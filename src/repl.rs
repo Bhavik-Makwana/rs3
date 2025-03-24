@@ -3,7 +3,15 @@ use std::io;
 enum StatementResult {
     Success,
     UnrecognizedStatement,
-    PrepareSyntaxError,
+    PrepareSyntaxError(PrepareSyntaxError),
+}
+
+#[derive(Debug)]
+enum PrepareSyntaxError {
+    InvalidId,
+    InvalidUsername,
+    InvalidEmail,
+    InvalidNumberOfArguments,
 }
 
 enum MetaCommandResult {
@@ -81,24 +89,24 @@ fn prepare_statement(input: &str, statement: &mut Statement) -> StatementResult 
         println!("parts {:?}", parts);
 
         if parts.len() != 4 {
-            return StatementResult::PrepareSyntaxError;
+            return StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidNumberOfArguments);
         }
 
         match parts[1].parse::<u32>() {
             Ok(id) => statement.row_to_insert.id = id,
-            Err(_) => return StatementResult::PrepareSyntaxError,
+            Err(_) => return StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId),
         }
 
         let username_bytes = parts[2].as_bytes();
         if username_bytes.len() > 32 {
-            return StatementResult::PrepareSyntaxError;
+            return StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidUsername);
         }
         statement.row_to_insert.username = [0; 32];
         statement.row_to_insert.username[..username_bytes.len()].copy_from_slice(username_bytes);
 
         let email_bytes = parts[3].as_bytes();
         if email_bytes.len() > 255 {
-            return StatementResult::PrepareSyntaxError;
+            return StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidEmail);
         }
         statement.row_to_insert.email = [0; 255];
         statement.row_to_insert.email[..email_bytes.len()].copy_from_slice(email_bytes);
@@ -177,8 +185,9 @@ pub fn run() {
                             }
                         }
                     }
-                    StatementResult::PrepareSyntaxError => {
+                    StatementResult::PrepareSyntaxError(error) => {
                         println!("Syntax error. Could not parse statement.");
+                        println!("Error: {:?}", error);
                     }
                     StatementResult::UnrecognizedStatement => {
                         println!(
@@ -221,11 +230,11 @@ mod tests {
         
         // Test too few arguments
         let result = prepare_statement("insert 1 user1", &mut statement);
-        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidNumberOfArguments)));
 
         // Test invalid ID
         let result = prepare_statement("insert abc user1 email@test.com", &mut statement);
-        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)));
 
         // Test username too long (> 32 bytes)
         let long_username = "a".repeat(33);
@@ -233,7 +242,7 @@ mod tests {
             &format!("insert 1 {} email@test.com", long_username),
             &mut statement
         );
-        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidUsername)));
 
         // Test email too long (> 255 bytes)
         let long_email = "a".repeat(256);
@@ -241,7 +250,7 @@ mod tests {
             &format!("insert 1 user1 {}", long_email),
             &mut statement
         );
-        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidEmail)));
     }
 
     #[test]
