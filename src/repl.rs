@@ -73,8 +73,9 @@ fn execute_select(_statement: Statement, table: &mut table::Table) -> ExecuteRes
     ExecuteResult::Success
 }
 
-fn execute_meta_command(cmd: &str) -> MetaCommandResult {
+fn execute_meta_command(cmd: &str, table: &mut table::Table) -> MetaCommandResult {
     if cmd == ".exit" {
+        table.db_close();
         std::process::exit(0);
     } else {
         MetaCommandResult::UnrecognizedCommand
@@ -156,15 +157,15 @@ fn print_prompt() {
     print!("db > ");
 }
 
-pub fn run() {
-    let mut table = table::Table::new();
+pub fn run(table_name: &str) {
+    let mut table = table::Table::db_open(table_name);
     println!("Hello, world!");
     let mut input_buffer = InputBuffer::new();
     loop {
         print_prompt();
         input_buffer.read_input();
         match input_buffer.buffer.trim() {
-            cmd if cmd.starts_with(".") => match execute_meta_command(cmd) {
+            cmd if cmd.starts_with(".") => match execute_meta_command(cmd, &mut table) {
                 MetaCommandResult::_Success => continue,
                 MetaCommandResult::UnrecognizedCommand => {
                     println!("Unrecognized command '{}'.", cmd);
@@ -251,6 +252,10 @@ mod tests {
             &mut statement
         );
         assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidEmail)));
+
+        // Test negative ID
+        let result = prepare_statement("insert -1 user1 email@test.com", &mut statement);
+        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)));
     }
 
     #[test]
@@ -272,7 +277,8 @@ mod tests {
 
     #[test]
     fn test_execute_meta_command() {
-        let result = execute_meta_command(".unknown");
+        let mut table = table::Table::db_open("test.rdb");
+        let result = execute_meta_command(".unknown", &mut table);
         assert!(matches!(result, MetaCommandResult::UnrecognizedCommand));
         
         // Note: We can't easily test ".exit" as it calls std::process::exit()

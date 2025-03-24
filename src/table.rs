@@ -1,7 +1,7 @@
 use std::fmt;
 use std::mem;
 use log::{debug, error, info, warn};
-
+use crate::pager::Pager;
 // Define the Row struct first (if not already defined)
 #[repr(C)]
 pub struct Row {
@@ -49,12 +49,12 @@ pub const ROWS_PER_PAGE: usize = PAGE_SIZE / ROW_SIZE;
 pub const TABLE_MAX_ROWS: usize = ROWS_PER_PAGE * TABLE_MAX_PAGES;
 pub struct Table {
     pub num_rows: usize,
-    pub pages: Vec<Vec<u8>>,
+    pub pager: Pager,
 }
 
 impl Default for Table {
     fn default() -> Self {
-        Table::new()
+        Table::db_open("test.rdb")
     }
 }
 
@@ -65,10 +65,39 @@ impl Default for Row {
 }
 
 impl Table {
-    pub fn new() -> Self {
+    pub fn db_open(filename: &str) -> Self {
+        let pager = Pager::pager_open(filename);
+        println!("Lengsssh of pages: {}", pager.pages.len());
+        let file_length = pager.file_length as usize;
         Table {
-            num_rows: 0,
-            pages: vec![vec![0; PAGE_SIZE]; TABLE_MAX_PAGES],
+            pager: pager,
+            num_rows: file_length / ROW_SIZE,
+        }
+    }
+
+    pub fn db_close(&mut self) {
+        let num_full_pages = self.num_rows / ROWS_PER_PAGE;
+        for i in 0..num_full_pages {
+            if self.pager.pages[i].iter().all(|&x| x == 0) {
+                continue;
+            }
+            self.pager.flush(i as u64).unwrap();
+            self.pager.pages[i] = vec![0; PAGE_SIZE];
+        }
+
+        // Handle partial page
+        let num_remaining_rows = self.num_rows % ROWS_PER_PAGE;
+        if num_remaining_rows > 0 {
+            let page_num = num_full_pages;
+            if !self.pager.pages[page_num].iter().all(|&x| x == 0) {
+                self.pager.flush(page_num as u64).unwrap();
+                self.pager.pages[page_num] = vec![0; PAGE_SIZE];
+            }
+
+        }
+
+        if let Err(e) = self.pager.file_descriptor.sync_data() {
+            error!("Error closing database file: {}", e);
         }
     }
 
@@ -87,12 +116,13 @@ impl Table {
         // println!("id: {}", id);
         println!("destination: {:?}", destination);
         // println!("Length of pages: {}", self.pages.len());
-        self.pages[destination.0][destination.1 + ID_OFFSET..destination.1 + ID_OFFSET + ID_SIZE]
+        println!("Length of pages: {}", self.pager.pages.len());
+        self.pager.pages[destination.0][destination.1 + ID_OFFSET..destination.1 + ID_OFFSET + ID_SIZE]
             .copy_from_slice(&id.to_le_bytes());
-        self.pages[destination.0]
+        self.pager.pages[destination.0]
             [destination.1 + USERNAME_OFFSET..destination.1 + USERNAME_OFFSET + USERNAME_SIZE]
             .copy_from_slice(&source.username);
-        self.pages[destination.0]
+        self.pager.pages[destination.0]
             [destination.1 + EMAIL_OFFSET..destination.1 + EMAIL_OFFSET + EMAIL_SIZE]
             .copy_from_slice(&source.email);
     }
@@ -100,15 +130,15 @@ impl Table {
     pub fn deserialize_row(&mut self, page: usize, offset: usize) -> Row {
         Row {
             id: u32::from_le_bytes(
-                self.pages[page][offset + ID_OFFSET..offset + ID_OFFSET + ID_SIZE]
+                self.pager.pages[page][offset + ID_OFFSET..offset + ID_OFFSET + ID_SIZE]
                     .try_into()
                     .unwrap(),
             ),
-            username: self.pages[page]
+            username: self.pager.pages[page]
                 [offset + USERNAME_OFFSET..offset + USERNAME_OFFSET + USERNAME_SIZE]
                 .try_into()
                 .unwrap(),
-            email: self.pages[page][offset + EMAIL_OFFSET..offset + EMAIL_OFFSET + EMAIL_SIZE]
+            email: self.pager.pages[page][offset + EMAIL_OFFSET..offset + EMAIL_OFFSET + EMAIL_SIZE]
                 .try_into()
                 .unwrap(),
         }
@@ -142,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_table_serialization_deserialization() {
-        let mut table = Table::new();
+        let mut table = Table::db_open("test.rdb");
         let mut row = Row::new();
         row.id = 42;
         row.username[..5].copy_from_slice(b"alice");
@@ -165,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_table_multiple_rows() {
-        let mut table = Table::new();
+        let mut table = Table::db_open("test.rdb");
         
         // Create and insert first row
         let mut row1 = Row::new();
@@ -200,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_table_page_boundary() {
-        let mut table = Table::new();
+        let mut table = Table::db_open("test.rdb");
         
         // Calculate how many rows we need to fill a page and spill over
         let rows_for_test = ROWS_PER_PAGE + 2;
@@ -231,6 +261,6 @@ mod tests {
         }
 
         // Verify we actually used multiple pages
-        assert!(table.pages.len() > 1);
+        assert!(table.pager.pages.len() > 1);
     }
 }
