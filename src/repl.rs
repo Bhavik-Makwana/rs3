@@ -191,3 +191,81 @@ pub fn run() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prepare_statement_insert() {
+        let mut statement = Statement::new();
+        let input = "insert 1 user1 user1@example.com";
+        
+        let result = prepare_statement(input, &mut statement);
+        assert!(matches!(result, StatementResult::Success));
+        assert!(matches!(statement.statement_type, StatementType::Insert));
+        assert_eq!(statement.row_to_insert.id, 1);
+        
+        // Check username was properly copied
+        let expected_username = "user1".as_bytes();
+        assert_eq!(&statement.row_to_insert.username[..expected_username.len()], expected_username);
+        
+        // Check email was properly copied
+        let expected_email = "user1@example.com".as_bytes();
+        assert_eq!(&statement.row_to_insert.email[..expected_email.len()], expected_email);
+    }
+
+    #[test]
+    fn test_prepare_statement_insert_syntax_error() {
+        let mut statement = Statement::new();
+        
+        // Test too few arguments
+        let result = prepare_statement("insert 1 user1", &mut statement);
+        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+
+        // Test invalid ID
+        let result = prepare_statement("insert abc user1 email@test.com", &mut statement);
+        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+
+        // Test username too long (> 32 bytes)
+        let long_username = "a".repeat(33);
+        let result = prepare_statement(
+            &format!("insert 1 {} email@test.com", long_username),
+            &mut statement
+        );
+        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+
+        // Test email too long (> 255 bytes)
+        let long_email = "a".repeat(256);
+        let result = prepare_statement(
+            &format!("insert 1 user1 {}", long_email),
+            &mut statement
+        );
+        assert!(matches!(result, StatementResult::PrepareSyntaxError));
+    }
+
+    #[test]
+    fn test_prepare_statement_select() {
+        let mut statement = Statement::new();
+        let result = prepare_statement("select", &mut statement);
+        
+        assert!(matches!(result, StatementResult::Success));
+        assert!(matches!(statement.statement_type, StatementType::Select));
+    }
+
+    #[test]
+    fn test_prepare_statement_unrecognized() {
+        let mut statement = Statement::new();
+        let result = prepare_statement("invalid statement", &mut statement);
+        
+        assert!(matches!(result, StatementResult::UnrecognizedStatement));
+    }
+
+    #[test]
+    fn test_execute_meta_command() {
+        let result = execute_meta_command(".unknown");
+        assert!(matches!(result, MetaCommandResult::UnrecognizedCommand));
+        
+        // Note: We can't easily test ".exit" as it calls std::process::exit()
+    }
+}

@@ -1,5 +1,7 @@
 use std::fmt;
 use std::mem;
+use log::{debug, error, info, warn};
+
 // Define the Row struct first (if not already defined)
 #[repr(C)]
 pub struct Row {
@@ -110,5 +112,125 @@ impl Table {
                 .try_into()
                 .unwrap(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_row_creation() {
+        let row = Row::new();
+        assert_eq!(row.id, 0);
+        assert_eq!(row.username, [0; 32]);
+        assert_eq!(row.email, [0; 255]);
+    }
+
+    #[test]
+    fn test_row_display() {
+        let mut row = Row::new();
+        row.id = 1;
+        row.username[..5].copy_from_slice(b"alice");
+        row.email[..14].copy_from_slice(b"alice@test.com");
+        
+        let display_string = format!("{}", row);
+        assert!(display_string.contains("id: 1"));
+        assert!(display_string.contains("username: alice"));
+        assert!(display_string.contains("email: alice@test.com"));
+    }
+
+    #[test]
+    fn test_table_serialization_deserialization() {
+        let mut table = Table::new();
+        let mut row = Row::new();
+        row.id = 42;
+        row.username[..5].copy_from_slice(b"alice");
+        row.email[..14].copy_from_slice(b"alice@test.com");
+
+        // Test row_slot calculation
+        let slot = table.row_slot(0);
+        assert_eq!(slot.0, 0); // First page
+        assert_eq!(slot.1, 0); // First position
+
+        // Test serialization
+        table.serialize_row(&row, slot);
+
+        // Test deserialization
+        let deserialized_row = table.deserialize_row(slot.0, slot.1);
+        assert_eq!(deserialized_row.id, 42);
+        assert_eq!(&deserialized_row.username[..5], b"alice");
+        assert_eq!(&deserialized_row.email[..14], b"alice@test.com");
+    }
+
+    #[test]
+    fn test_table_multiple_rows() {
+        let mut table = Table::new();
+        
+        // Create and insert first row
+        let mut row1 = Row::new();
+        row1.id = 1;
+        row1.username[..3].copy_from_slice(b"bob");
+        row1.email[..12].copy_from_slice(b"bob@test.com");
+        
+        // Create and insert second row
+        let mut row2 = Row::new();
+        row2.id = 2;
+        row2.username[..5].copy_from_slice(b"alice");
+        row2.email[..14].copy_from_slice(b"alice@test.com");
+
+        // Insert both rows
+        let slot1 = table.row_slot(0);
+        let slot2 = table.row_slot(1);
+        table.serialize_row(&row1, slot1);
+        table.serialize_row(&row2, slot2);
+
+        // Verify both rows
+        let retrieved_row1 = table.deserialize_row(slot1.0, slot1.1);
+        let retrieved_row2 = table.deserialize_row(slot2.0, slot2.1);
+
+        assert_eq!(retrieved_row1.id, 1);
+        assert_eq!(&retrieved_row1.username[..3], b"bob");
+        assert_eq!(&retrieved_row1.email[..12], b"bob@test.com");
+
+        assert_eq!(retrieved_row2.id, 2);
+        assert_eq!(&retrieved_row2.username[..5], b"alice");
+        assert_eq!(&retrieved_row2.email[..14], b"alice@test.com");
+    }
+
+    #[test]
+    fn test_table_page_boundary() {
+        let mut table = Table::new();
+        
+        // Calculate how many rows we need to fill a page and spill over
+        let rows_for_test = ROWS_PER_PAGE + 2;
+        
+        // Create and insert rows
+        for i in 0..rows_for_test {
+            let mut row = Row::new();
+            row.id = i as u32;
+            row.username[..4].copy_from_slice(b"user");
+            row.email[..13].copy_from_slice(b"user@test.com");
+            
+            let slot = table.row_slot(table.num_rows);
+            table.serialize_row(&row, slot);
+            table.num_rows += 1;
+            // Verify the page number calculation
+            println!("slot: {:?}, i: {}", slot, i);
+            assert_eq!(slot.0, i / ROWS_PER_PAGE);
+            assert_eq!(slot.1, (i % ROWS_PER_PAGE) * ROW_SIZE);
+        }
+
+        // Verify rows from both pages
+        for i in 0..rows_for_test {
+            let slot = table.row_slot(i);
+            let retrieved_row = table.deserialize_row(slot.0, slot.1);
+            assert_eq!(retrieved_row.id, i as u32);
+            assert_eq!(&retrieved_row.username[..4], b"user");
+            assert_eq!(&retrieved_row.email[..13], b"user@test.com");
+        }
+
+        // Verify we actually used multiple pages
+        assert!(table.pages.len() > 1);
     }
 }
