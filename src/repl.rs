@@ -1,3 +1,4 @@
+use crate::cursor::{Cursor, CursorLocation};
 use crate::table::{self, Row};
 use std::io;
 enum StatementResult {
@@ -57,7 +58,7 @@ fn execute_insert(statement: Statement, table: &mut table::Table) -> ExecuteResu
         return ExecuteResult::TableFull;
     }
     let row_to_insert = statement.row_to_insert;
-    let (page, idx) = table.row_slot(table.num_rows);
+    let (page, idx) = table.cursor_value(CursorLocation::End);
     table.serialize_row(&row_to_insert, (page, idx));
     table.num_rows += 1;
     ExecuteResult::Success
@@ -65,11 +66,11 @@ fn execute_insert(statement: Statement, table: &mut table::Table) -> ExecuteResu
 
 fn execute_select(_statement: Statement, table: &mut table::Table) -> ExecuteResult {
     let mut row;
-    for i in 0..table.num_rows {
-        let (page, idx) = table.row_slot(i);
-        println!("i: {}, page: {}, idx: {}", i, page, idx);
+    while !table.start_cursor.end_of_table {
+        let (page, idx) = table.cursor_value(CursorLocation::Start);
         row = table.deserialize_row(page, idx);
         println!("{}", row);
+        table.start_cursor.advance();
     }
     ExecuteResult::Success
 }

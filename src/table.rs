@@ -1,3 +1,4 @@
+use crate::cursor::{Cursor, CursorLocation};
 use crate::pager::Pager;
 use log::{error, info};
 use std::fmt;
@@ -50,6 +51,8 @@ pub const TABLE_MAX_ROWS: usize = ROWS_PER_PAGE * TABLE_MAX_PAGES;
 pub struct Table {
     pub num_rows: usize,
     pub pager: Pager,
+    pub start_cursor: Cursor,
+    pub end_cursor: Cursor,
 }
 
 pub type TableOffset = (usize, usize);
@@ -73,6 +76,11 @@ impl Table {
         Table {
             pager: pager,
             num_rows: file_length / ROW_SIZE,
+            start_cursor: Cursor::table_start(file_length / ROW_SIZE),
+            end_cursor: Cursor::table_end(
+                file_length / ROW_SIZE,
+                (TABLE_MAX_PAGES * PAGE_SIZE) / ROW_SIZE,
+            ),
         }
     }
 
@@ -103,7 +111,13 @@ impl Table {
         }
     }
 
-    pub fn row_slot(&mut self, row_num: usize) -> TableOffset {
+    pub fn cursor_value(&mut self, cursor: CursorLocation) -> TableOffset {
+        let row_num: usize;
+        if cursor == CursorLocation::Start {
+            row_num = self.start_cursor.row_num;
+        } else {
+            row_num = self.end_cursor.row_num;
+        }
         let page_num = row_num / ROWS_PER_PAGE;
         // let page = self.pages[page_num];
 
@@ -185,8 +199,8 @@ mod tests {
         row.username[..5].copy_from_slice(b"alice");
         row.email[..14].copy_from_slice(b"alice@test.com");
 
-        // Test row_slot calculation
-        let slot = table.row_slot(0);
+        // Test cursor_value calculation
+        let slot = table.cursor_value(0);
         assert_eq!(slot.0, 0); // First page
         assert_eq!(slot.1, 0); // First position
 
@@ -217,8 +231,8 @@ mod tests {
         row2.email[..14].copy_from_slice(b"alice@test.com");
 
         // Insert both rows
-        let slot1 = table.row_slot(0);
-        let slot2 = table.row_slot(1);
+        let slot1 = table.cursor_value(0);
+        let slot2 = table.cursor_value(1);
         table.serialize_row(&row1, slot1);
         table.serialize_row(&row2, slot2);
 
@@ -249,7 +263,7 @@ mod tests {
             row.username[..4].copy_from_slice(b"user");
             row.email[..13].copy_from_slice(b"user@test.com");
 
-            let slot = table.row_slot(table.num_rows);
+            let slot = table.cursor_value(table.num_rows);
             table.serialize_row(&row, slot);
             table.num_rows += 1;
             // Verify the page number calculation
@@ -260,7 +274,7 @@ mod tests {
 
         // Verify rows from both pages
         for i in 0..rows_for_test {
-            let slot = table.row_slot(i);
+            let slot = table.cursor_value(i);
             let retrieved_row = table.deserialize_row(slot.0, slot.1);
             assert_eq!(retrieved_row.id, i as u32);
             assert_eq!(&retrieved_row.username[..4], b"user");
