@@ -164,7 +164,6 @@ pub fn run(table_name: &str) {
     let mut table = table::Table::db_open(table_name);
     println!("Table rows: {}", table.num_rows);
     println!("Table pages: {}", table.pager.pages.len());
-    println!("Table page 0: {:?}", table.pager.pages[0][0..291].to_vec());
     let mut input_buffer = InputBuffer::new();
     loop {
         print_prompt();

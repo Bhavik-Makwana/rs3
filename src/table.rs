@@ -1,5 +1,5 @@
 use crate::pager::Pager;
-use log::{debug, error, info, warn};
+use log::{error, info};
 use std::fmt;
 use std::mem;
 // Define the Row struct first (if not already defined)
@@ -52,6 +52,8 @@ pub struct Table {
     pub pager: Pager,
 }
 
+pub type TableOffset = (usize, usize);
+
 impl Default for Table {
     fn default() -> Self {
         Table::db_open("test.rdb")
@@ -101,7 +103,7 @@ impl Table {
         }
     }
 
-    pub fn row_slot(&mut self, row_num: usize) -> (usize, usize) {
+    pub fn row_slot(&mut self, row_num: usize) -> TableOffset {
         let page_num = row_num / ROWS_PER_PAGE;
         // let page = self.pages[page_num];
 

@@ -1,6 +1,6 @@
 use crate::table::{PAGE_SIZE, ROW_SIZE, TABLE_MAX_PAGES};
 use log::info;
-use std::{fs::File, io::Read, os::unix::fs::FileExt};
+use std::{fs::File, os::unix::fs::FileExt};
 pub struct Pager {
     pub file_descriptor: File,
     pub file_length: u64,
