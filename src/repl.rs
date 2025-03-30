@@ -67,6 +67,7 @@ fn execute_select(_statement: Statement, table: &mut table::Table) -> ExecuteRes
     let mut row;
     for i in 0..table.num_rows {
         let (page, idx) = table.row_slot(i);
+        println!("i: {}, page: {}, idx: {}", i, page, idx);
         row = table.deserialize_row(page, idx);
         println!("{}", row);
     }
@@ -90,7 +91,9 @@ fn prepare_statement(input: &str, statement: &mut Statement) -> StatementResult 
         println!("parts {:?}", parts);
 
         if parts.len() != 4 {
-            return StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidNumberOfArguments);
+            return StatementResult::PrepareSyntaxError(
+                PrepareSyntaxError::InvalidNumberOfArguments,
+            );
         }
 
         match parts[1].parse::<u32>() {
@@ -159,7 +162,9 @@ fn print_prompt() {
 
 pub fn run(table_name: &str) {
     let mut table = table::Table::db_open(table_name);
-    println!("Hello, world!");
+    println!("Table rows: {}", table.num_rows);
+    println!("Table pages: {}", table.pager.pages.len());
+    println!("Table page 0: {:?}", table.pager.pages[0][0..291].to_vec());
     let mut input_buffer = InputBuffer::new();
     loop {
         print_prompt();
@@ -210,59 +215,77 @@ mod tests {
     fn test_prepare_statement_insert() {
         let mut statement = Statement::new();
         let input = "insert 1 user1 user1@example.com";
-        
+
         let result = prepare_statement(input, &mut statement);
         assert!(matches!(result, StatementResult::Success));
         assert!(matches!(statement.statement_type, StatementType::Insert));
         assert_eq!(statement.row_to_insert.id, 1);
-        
+
         // Check username was properly copied
         let expected_username = "user1".as_bytes();
-        assert_eq!(&statement.row_to_insert.username[..expected_username.len()], expected_username);
-        
+        assert_eq!(
+            &statement.row_to_insert.username[..expected_username.len()],
+            expected_username
+        );
+
         // Check email was properly copied
         let expected_email = "user1@example.com".as_bytes();
-        assert_eq!(&statement.row_to_insert.email[..expected_email.len()], expected_email);
+        assert_eq!(
+            &statement.row_to_insert.email[..expected_email.len()],
+            expected_email
+        );
     }
 
     #[test]
     fn test_prepare_statement_insert_syntax_error() {
         let mut statement = Statement::new();
-        
+
         // Test too few arguments
         let result = prepare_statement("insert 1 user1", &mut statement);
-        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidNumberOfArguments)));
+        assert!(matches!(
+            result,
+            StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidNumberOfArguments)
+        ));
 
         // Test invalid ID
         let result = prepare_statement("insert abc user1 email@test.com", &mut statement);
-        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)));
+        assert!(matches!(
+            result,
+            StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)
+        ));
 
         // Test username too long (> 32 bytes)
         let long_username = "a".repeat(33);
         let result = prepare_statement(
             &format!("insert 1 {} email@test.com", long_username),
-            &mut statement
+            &mut statement,
         );
-        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidUsername)));
+        assert!(matches!(
+            result,
+            StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidUsername)
+        ));
 
         // Test email too long (> 255 bytes)
         let long_email = "a".repeat(256);
-        let result = prepare_statement(
-            &format!("insert 1 user1 {}", long_email),
-            &mut statement
-        );
-        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidEmail)));
+        let result = prepare_statement(&format!("insert 1 user1 {}", long_email), &mut statement);
+        assert!(matches!(
+            result,
+            StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidEmail)
+        ));
 
         // Test negative ID
         let result = prepare_statement("insert -1 user1 email@test.com", &mut statement);
-        assert!(matches!(result, StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)));
+        assert!(matches!(
+            result,
+            StatementResult::PrepareSyntaxError(PrepareSyntaxError::InvalidId)
+        ));
     }
 
     #[test]
     fn test_prepare_statement_select() {
         let mut statement = Statement::new();
         let result = prepare_statement("select", &mut statement);
-        
+
         assert!(matches!(result, StatementResult::Success));
         assert!(matches!(statement.statement_type, StatementType::Select));
     }
@@ -271,7 +294,7 @@ mod tests {
     fn test_prepare_statement_unrecognized() {
         let mut statement = Statement::new();
         let result = prepare_statement("invalid statement", &mut statement);
-        
+
         assert!(matches!(result, StatementResult::UnrecognizedStatement));
     }
 
@@ -280,7 +303,7 @@ mod tests {
         let mut table = table::Table::db_open("test.rdb");
         let result = execute_meta_command(".unknown", &mut table);
         assert!(matches!(result, MetaCommandResult::UnrecognizedCommand));
-        
+
         // Note: We can't easily test ".exit" as it calls std::process::exit()
     }
 }

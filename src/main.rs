@@ -6,6 +6,6 @@ fn main() {
     } else {
         "test.db" // Default table name if none provided
     };
-    
+
     repl::run(table_name);
 }

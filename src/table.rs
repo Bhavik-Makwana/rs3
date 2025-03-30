@@ -1,7 +1,7 @@
+use crate::pager::Pager;
+use log::{debug, error, info, warn};
 use std::fmt;
 use std::mem;
-use log::{debug, error, info, warn};
-use crate::pager::Pager;
 // Define the Row struct first (if not already defined)
 #[repr(C)]
 pub struct Row {
@@ -67,7 +67,6 @@ impl Default for Row {
 impl Table {
     pub fn db_open(filename: &str) -> Self {
         let pager = Pager::pager_open(filename);
-        println!("Lengsssh of pages: {}", pager.pages.len());
         let file_length = pager.file_length as usize;
         Table {
             pager: pager,
@@ -81,7 +80,7 @@ impl Table {
             if self.pager.pages[i].iter().all(|&x| x == 0) {
                 continue;
             }
-            self.pager.flush(i as u64).unwrap();
+            self.pager.flush(i as u64, None).unwrap();
             self.pager.pages[i] = vec![0; PAGE_SIZE];
         }
 
@@ -90,10 +89,11 @@ impl Table {
         if num_remaining_rows > 0 {
             let page_num = num_full_pages;
             if !self.pager.pages[page_num].iter().all(|&x| x == 0) {
-                self.pager.flush(page_num as u64).unwrap();
+                self.pager
+                    .flush(page_num as u64, Some(num_remaining_rows))
+                    .unwrap();
                 self.pager.pages[page_num] = vec![0; PAGE_SIZE];
             }
-
         }
 
         if let Err(e) = self.pager.file_descriptor.sync_data() {
@@ -113,11 +113,14 @@ impl Table {
 
     pub fn serialize_row(&mut self, source: &Row, destination: (usize, usize)) {
         let id = source.id;
-        // println!("id: {}", id);
-        println!("destination: {:?}", destination);
-        // println!("Length of pages: {}", self.pages.len());
-        println!("Length of pages: {}", self.pager.pages.len());
-        self.pager.pages[destination.0][destination.1 + ID_OFFSET..destination.1 + ID_OFFSET + ID_SIZE]
+        info!(
+            "Serialize Row \nDestination {:?}\nLength of pages: {}",
+            destination,
+            self.pager.pages.len()
+        );
+
+        self.pager.pages[destination.0]
+            [destination.1 + ID_OFFSET..destination.1 + ID_OFFSET + ID_SIZE]
             .copy_from_slice(&id.to_le_bytes());
         self.pager.pages[destination.0]
             [destination.1 + USERNAME_OFFSET..destination.1 + USERNAME_OFFSET + USERNAME_SIZE]
@@ -128,6 +131,7 @@ impl Table {
     }
 
     pub fn deserialize_row(&mut self, page: usize, offset: usize) -> Row {
+        info!("Deserialize Row \nPage: {}, Offset: {}", page, offset);
         Row {
             id: u32::from_le_bytes(
                 self.pager.pages[page][offset + ID_OFFSET..offset + ID_OFFSET + ID_SIZE]
@@ -138,7 +142,8 @@ impl Table {
                 [offset + USERNAME_OFFSET..offset + USERNAME_OFFSET + USERNAME_SIZE]
                 .try_into()
                 .unwrap(),
-            email: self.pager.pages[page][offset + EMAIL_OFFSET..offset + EMAIL_OFFSET + EMAIL_SIZE]
+            email: self.pager.pages[page]
+                [offset + EMAIL_OFFSET..offset + EMAIL_OFFSET + EMAIL_SIZE]
                 .try_into()
                 .unwrap(),
         }
@@ -163,7 +168,7 @@ mod tests {
         row.id = 1;
         row.username[..5].copy_from_slice(b"alice");
         row.email[..14].copy_from_slice(b"alice@test.com");
-        
+
         let display_string = format!("{}", row);
         assert!(display_string.contains("id: 1"));
         assert!(display_string.contains("username: alice"));
@@ -196,13 +201,13 @@ mod tests {
     #[test]
     fn test_table_multiple_rows() {
         let mut table = Table::db_open("test.rdb");
-        
+
         // Create and insert first row
         let mut row1 = Row::new();
         row1.id = 1;
         row1.username[..3].copy_from_slice(b"bob");
         row1.email[..12].copy_from_slice(b"bob@test.com");
-        
+
         // Create and insert second row
         let mut row2 = Row::new();
         row2.id = 2;
@@ -231,17 +236,17 @@ mod tests {
     #[test]
     fn test_table_page_boundary() {
         let mut table = Table::db_open("test.rdb");
-        
+
         // Calculate how many rows we need to fill a page and spill over
         let rows_for_test = ROWS_PER_PAGE + 2;
-        
+
         // Create and insert rows
         for i in 0..rows_for_test {
             let mut row = Row::new();
             row.id = i as u32;
             row.username[..4].copy_from_slice(b"user");
             row.email[..13].copy_from_slice(b"user@test.com");
-            
+
             let slot = table.row_slot(table.num_rows);
             table.serialize_row(&row, slot);
             table.num_rows += 1;
